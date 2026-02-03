@@ -1,15 +1,14 @@
 /**
- * sBTC YieldAgent — x402 registered on Base
- * Live sBTC / STX yield data from Stacks DeFi — pay with 0.01 USDC on Base
+ * sBTC YieldAgent — x402 on Base, content: Stacks yields
  */
 
 const CONFIG = {
   PAYMENT_ADDRESS: '0x97d794dB5F8B6569A7fdeD9DF57648f0b464d4F1',
-  PAYMENT_AMOUNT: '0.01',                    // human-readable
-  PAYMENT_AMOUNT_ATOMIC: '10000',            // 0.01 USDC × 10^6
+  PAYMENT_AMOUNT: '0.01',
+  PAYMENT_AMOUNT_ATOMIC: '10000',
   USDC_CONTRACT: '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913',
-  NETWORK_CAIP2: 'eip155:8453',              // Base mainnet
-  API_DESCRIPTION: 'Live sBTC & STX yield opportunities on Stacks — pay with USDC on Base',
+  NETWORK_CAIP2: 'eip155:8453',
+  API_DESCRIPTION: 'Live sBTC & STX yields on Stacks — pay with USDC on Base',
   MAX_TIMEOUT_SECONDS: 300
 };
 
@@ -133,7 +132,7 @@ document.getElementById('unlockBtn').addEventListener('click', async function ()
 </html>`;
 
 /**
- * Shared discovery payload — used in 402 response and /.well-known/x402
+ * Shared discovery payload
  */
 function discoveryDoc(origin) {
   return {
@@ -173,25 +172,21 @@ export default {
       return new Response(null, { headers: cors });
     }
 
-    // Discovery endpoint
     if (path === '/x402-info' || path === '/.well-known/x402') {
       return new Response(JSON.stringify(discoveryDoc(origin)), {
         headers: { ...cors, 'Content-Type': 'application/json' }
       });
     }
 
-    // Main endpoint
     if (path === '/' || path === '/yields' || path === '/data') {
       const payHeader = req.headers.get('X-Payment');
 
       if (!payHeader) {
-        // Browser → HTML landing page
         if (req.headers.get('Accept')?.includes('text/html')) {
           return new Response(HTML_PAGE, {
             headers: { ...cors, 'Content-Type': 'text/html' }
           });
         }
-        // Agent/scanner → 402 JSON
         return new Response(JSON.stringify(discoveryDoc(origin)), {
           status: 402,
           headers: { ...cors, 'Content-Type': 'application/json' }
@@ -217,7 +212,6 @@ export default {
           });
         }
 
-        // Verified → serve content
         if (req.headers.get('Accept')?.includes('text/html')) {
           return new Response(HTML_PAGE, {
             headers: { ...cors, 'Content-Type': 'text/html', 'X-Payment-Verified': 'true' }
