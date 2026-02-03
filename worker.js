@@ -8,7 +8,7 @@ const CONFIG = {
   PAYMENT_AMOUNT: '0.01',                    // human-readable
   PAYMENT_AMOUNT_ATOMIC: '10000',            // 0.01 USDC × 10^6
   USDC_CONTRACT: '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913',
-  NETWORK_CAIP2: 'eip155:8453',              // Base mainnet (x402scan requires this)
+  NETWORK_CAIP2: 'eip155:8453',              // Base mainnet
   API_DESCRIPTION: 'Live sBTC & STX yield opportunities on Stacks — pay with USDC on Base',
   MAX_TIMEOUT_SECONDS: 300
 };
@@ -17,13 +17,13 @@ const YIELD_DATA = {
   success: true,
   data: {
     opportunities: [
-      { id: 1, protocol: 'sBTC Native Hold', apy: '~5%', risk: 'Low', tvl: 'Protocol-level', asset: 'sBTC', note: 'Base 5% BTC reward on every sBTC holding, paid every 2 weeks' },
-      { id: 2, protocol: 'Bitflow sBTC/STX Pool', apy: '20%+', risk: 'Medium', tvl: '~$10M+', asset: 'sBTC', note: 'DEX LP — swap-fee yield + sBTC stacking rewards' },
-      { id: 3, protocol: 'Velar sBTC Pool', apy: '~20%', risk: 'Medium', tvl: '~$20M+', asset: 'sBTC', note: 'LP yield + VELAR token incentive rewards' },
-      { id: 4, protocol: 'ALEX sBTC Pool', apy: '5% + ALEX', risk: 'Low-Medium', tvl: '~$20M+', asset: 'sBTC', note: 'Base 5% sBTC + Surge campaign ALEX rewards' },
-      { id: 5, protocol: 'Zest sBTC Lending', apy: '7–10%', risk: 'Low', tvl: '~$50M+', asset: 'sBTC', note: 'Supply sBTC, earn extra BTC yield (Binance Labs backed)' },
-      { id: 6, protocol: 'Stacking DAO (stSTXbtc)', apy: '~10%', risk: 'Low', tvl: '~$30M+', asset: 'STX', note: 'Liquid stacking — earn sBTC rewards daily, stay liquid' },
-      { id: 7, protocol: 'Hermetica USDh', apy: 'up to 25%', risk: 'Medium', tvl: '~$15M+', asset: 'USDh', note: 'BTC-backed stablecoin yield via perpetual funding rates' }
+      { id: 1, protocol: 'sBTC Native Hold', apy: '~5%', risk: 'Low', tvl: 'Protocol-level', asset: 'sBTC', note: 'Base 5 % BTC reward on every sBTC holding, paid every 2 weeks' },
+      { id: 2, protocol: 'Bitflow sBTC/STX Pool', apy: '20 %+', risk: 'Medium', tvl: '~$10 M+', asset: 'sBTC', note: 'DEX LP — swap-fee yield + sBTC stacking rewards' },
+      { id: 3, protocol: 'Velar sBTC Pool', apy: '~20 %', risk: 'Medium', tvl: '~$20 M+', asset: 'sBTC', note: 'LP yield + VELAR token incentive rewards' },
+      { id: 4, protocol: 'ALEX sBTC Pool', apy: '5 % + ALEX', risk: 'Low-Medium', tvl: '~$20 M+', asset: 'sBTC', note: 'Base 5 % sBTC + Surge campaign ALEX rewards' },
+      { id: 5, protocol: 'Zest sBTC Lending', apy: '7–10 %', risk: 'Low', tvl: '~$50 M+', asset: 'sBTC', note: 'Supply sBTC, earn extra BTC yield (Binance Labs backed)' },
+      { id: 6, protocol: 'Stacking DAO (stSTXbtc)', apy: '~10 %', risk: 'Low', tvl: '~$30 M+', asset: 'STX', note: 'Liquid stacking — earn sBTC rewards daily, stay liquid' },
+      { id: 7, protocol: 'Hermetica USDh', apy: 'up to 25 %', risk: 'Medium', tvl: '~$15 M+', asset: 'USDh', note: 'BTC-backed stablecoin yield via perpetual funding rates' }
     ],
     network: 'Stacks',
     lastUpdated: new Date().toISOString(),
