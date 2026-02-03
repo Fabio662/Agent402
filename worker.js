@@ -1,14 +1,14 @@
 /**
  * YieldAgent — x402 compliant Cloudflare Worker
- * Deploy as: my-agent-worker (wrangler name)
- * URL:       https://my-agent-worker.cryptoblac.workers.dev
+ * Deploy as: my-agent-worker
+ * URL: https://my-agent-worker.cryptoblac.workers.dev
  *
  * Routes:
- *   GET /.well-known/x402   → discovery JSON (x402scan probes this)
- *   GET /x402-info          → same discovery JSON
- *   GET /health             → quick status check
- *   GET /data               → protected: 402 if no payment, yield JSON if paid
- *   GET /                   → browser: HTML page | agent: 402 JSON
+ *   GET /.well-known/x402 → discovery JSON (x402scan probes this)
+ *   GET /x402-info       → same discovery JSON
+ *   GET /health          → quick status check
+ *   GET /data            → protected API (JSON only, 402 if unpaid)
+ *   GET /                → browser HTML landing page
  */
 
 // ─── CONFIG ──────────────────────────────────────────────────────────────────
@@ -16,20 +16,20 @@ const PAYMENT_ADDRESS = '0x97d794dB5F8B6569A7fdeD9DF57648f0b464d4F1';
 const USDC_CONTRACT   = '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913';
 const NETWORK         = 'base';
 const AMOUNT_HUMAN    = '0.01';
-const AMOUNT_ATOMIC   = '10000';                                        // 0.01 × 10^6
+const AMOUNT_ATOMIC   = '10000'; // 0.01 × 10^6
 
 // ─── YIELD DATA ──────────────────────────────────────────────────────────────
 const YIELD_PAYLOAD = {
   success: true,
   data: {
     opportunities: [
-      { id: 1, protocol: 'sBTC Native Hold',        apy: '~5 %',          risk: 'Low',        tvl: 'Protocol-level', asset: 'sBTC', note: 'Base 5 % BTC reward every 2 weeks on all sBTC holdings' },
-      { id: 2, protocol: 'Bitflow sBTC/STX Pool',   apy: '20 %+',        risk: 'Medium',     tvl: '~$10 M+',       asset: 'sBTC', note: 'DEX LP — swap-fee yield + sBTC stacking rewards' },
-      { id: 3, protocol: 'Velar sBTC Pool',         apy: '~20 %',        risk: 'Medium',     tvl: '~$20 M+',       asset: 'sBTC', note: 'LP yield + VELAR token incentive rewards' },
-      { id: 4, protocol: 'ALEX sBTC Pool',          apy: '5 % + ALEX',   risk: 'Low-Medium', tvl: '~$20 M+',       asset: 'sBTC', note: 'Base 5 % sBTC yield + Surge campaign ALEX rewards' },
-      { id: 5, protocol: 'Zest sBTC Lending',       apy: '7–10 %',       risk: 'Low',        tvl: '~$50 M+',       asset: 'sBTC', note: 'Supply sBTC, earn extra BTC yield (Binance Labs backed)' },
+      { id: 1, protocol: 'sBTC Native Hold',        apy: '~5 %',        risk: 'Low',        tvl: 'Protocol-level', asset: 'sBTC', note: 'Base 5 % BTC reward every 2 weeks on all sBTC holdings' },
+      { id: 2, protocol: 'Bitflow sBTC/STX Pool',   apy: '20 %+',       risk: 'Medium',     tvl: '~$10 M+',       asset: 'sBTC', note: 'DEX LP — swap-fee yield + sBTC stacking rewards' },
+      { id: 3, protocol: 'Velar sBTC Pool',         apy: '~20 %',       risk: 'Medium',     tvl: '~$20 M+',       asset: 'sBTC', note: 'LP yield + VELAR token incentive rewards' },
+      { id: 4, protocol: 'ALEX sBTC Pool',          apy: '5 % + ALEX',  risk: 'Low-Medium', tvl: '~$20 M+',       asset: 'sBTC', note: 'Base 5 % sBTC yield + Surge campaign ALEX rewards' },
+      { id: 5, protocol: 'Zest sBTC Lending',       apy: '7–10 %',      risk: 'Low',        tvl: '~$50 M+',       asset: 'sBTC', note: 'Supply sBTC, earn extra BTC yield (Binance Labs backed)' },
       { id: 6, protocol: 'Stacking DAO (stSTXbtc)', apy: '~10 %',       risk: 'Low',        tvl: '~$30 M+',       asset: 'STX',  note: 'Liquid stacking — earn sBTC rewards daily, stay liquid' },
-      { id: 7, protocol: 'Hermetica USDh',          apy: 'up to 25 %',   risk: 'Medium',    tvl: '~$15 M+',       asset: 'USDh', note: 'BTC-backed stablecoin yield via perpetual funding rates' }
+      { id: 7, protocol: 'Hermetica USDh',          apy: 'up to 25 %',  risk: 'Medium',     tvl: '~$15 M+',       asset: 'USDh', note: 'BTC-backed stablecoin yield via perpetual funding rates' }
     ],
     network:     'Stacks',
     lastUpdated: new Date().toISOString(),
@@ -44,19 +44,16 @@ function discoveryDoc(origin) {
     accepts: [
       {
         scheme:            'exact',
-        network:           'base',
+        network:           NETWORK,
         maxAmountRequired: AMOUNT_ATOMIC,
-        resource:          origin + '/',
+        resource:          origin + '/data', // 🔴 MUST be /data
         description:       'Live sBTC & STX yield data from top Stacks DeFi protocols',
         mimeType:          'application/json',
         payTo:             PAYMENT_ADDRESS,
         maxTimeoutSeconds: 300,
         asset:             USDC_CONTRACT,
         outputSchema: {
-          input:  { 
-            type: 'http',
-            method: 'GET'
-          },
+          input:  { type: 'http', method: 'GET' },
           output: null
         }
       }
@@ -64,8 +61,81 @@ function discoveryDoc(origin) {
   };
 }
 
-// ─── HTML LANDING PAGE ───────────────────────────────────────────────────────
-const HTML = `<!DOCTYPE html>
+// ─── CORS ────────────────────────────────────────────────────────────────────
+const CORS = {
+  'Access-Control-Allow-Origin':  '*',
+  'Access-Control-Allow-Methods': 'GET, OPTIONS',
+  'Access-Control-Allow-Headers': 'X-Payment, Content-Type'
+};
+
+function jsonResp(body, status = 200, extra = {}) {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { ...CORS, 'Content-Type': 'application/json', ...extra }
+  });
+}
+
+// ─── MAIN HANDLER ────────────────────────────────────────────────────────────
+export default {
+  async fetch(request) {
+    const url    = new URL(request.url);
+    const path   = url.pathname;
+    const origin = url.origin;
+
+    if (request.method === 'OPTIONS') {
+      return new Response(null, { status: 204, headers: CORS });
+    }
+
+    // ── /health ──────────────────────────────────────────────────────────
+    if (path === '/health') {
+      return jsonResp({ status: 'ok', x402: true, network: NETWORK, asset: 'USDC', content: 'stacks-sbtc-yields' });
+    }
+
+    // ── discovery ─────────────────────────────────────────────────────────
+    if (path === '/.well-known/x402' || path === '/x402-info') {
+      return jsonResp(discoveryDoc(origin));
+    }
+
+    // ── homepage (browser UI only) ───────────────────────────────────────
+    if (path === '/') {
+      const HTML = buildHTML();
+      return new Response(HTML, {
+        headers: { ...CORS, 'Content-Type': 'text/html; charset=utf-8' }
+      });
+    }
+
+    // ── protected API: /data ─────────────────────────────────────────────
+    if (path === '/data') {
+      const payHeader = request.headers.get('X-Payment');
+
+      // No payment → return 402 + discovery doc
+      if (!payHeader) {
+        return jsonResp(discoveryDoc(origin), 402);
+      }
+
+      try {
+        const payment = JSON.parse(payHeader);
+
+        if (!payment.txHash || String(payment.amount) !== AMOUNT_HUMAN) {
+          return jsonResp({ error: 'Invalid payment — need {"txHash":"0x…","amount":"0.01"}' }, 402);
+        }
+
+        // ⚠️ NOTE: Real on-chain verification not implemented yet.
+        return jsonResp(YIELD_PAYLOAD, 200, { 'X-Payment-Verified': 'true' });
+
+      } catch (_) {
+        return jsonResp({ error: 'Malformed X-Payment header' }, 400);
+      }
+    }
+
+    // ── 404 ──────────────────────────────────────────────────────────────
+    return jsonResp({ error: 'Not found', routes: ['/', '/data', '/.well-known/x402', '/x402-info', '/health'] }, 404);
+  }
+};
+
+// ─── HTML BUILDER (inside handler-safe) ──────────────────────────────────────
+function buildHTML() {
+  return `<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8">
@@ -133,7 +203,7 @@ const HTML = `<!DOCTYPE html>
   <div class="pay">
     <div class="pay-label">Send USDC on Base mainnet to unlock</div>
     <div class="pay-cost">0.01 USDC</div>
-    <div class="pay-addr" id="addr">0x97d794dB5F8B6569A7fdeD9DF57648f0b464d4F1</div>
+    <div class="pay-addr" id="addr">${PAYMENT_ADDRESS}</div>
     <button class="copy-btn" id="copyBtn">📋 Copy Address</button>
   </div>
 
@@ -149,7 +219,7 @@ const HTML = `<!DOCTYPE html>
 
 <script>
 document.getElementById('copyBtn').onclick = function () {
-  navigator.clipboard.writeText('0x97d794dB5F8B6569A7fdeD9DF57648f0b464d4F1');
+  navigator.clipboard.writeText('${PAYMENT_ADDRESS}');
   this.textContent = '✅ Copied';
   setTimeout(() => { this.textContent = '📋 Copy Address'; }, 1800);
 };
@@ -169,7 +239,7 @@ document.getElementById('unlockBtn').onclick = async function () {
   status.textContent = 'Verifying…';
   try {
     const res = await fetch('/data', {
-      headers: { 'X-Payment': JSON.stringify({ txHash: hash.trim(), amount: '0.01' }) }
+      headers: { 'X-Payment': JSON.stringify({ txHash: hash.trim(), amount: '${AMOUNT_HUMAN}' }) }
     });
     if (res.ok) {
       const json = await res.json();
@@ -191,73 +261,4 @@ document.getElementById('unlockBtn').onclick = async function () {
 </script>
 </body>
 </html>`;
-
-// ─── CORS ────────────────────────────────────────────────────────────────────
-const CORS = {
-  'Access-Control-Allow-Origin':  '*',
-  'Access-Control-Allow-Methods': 'GET, OPTIONS',
-  'Access-Control-Allow-Headers': 'X-Payment, Content-Type'
-};
-
-function jsonResp(body, status = 200, extra = {}) {
-  return new Response(JSON.stringify(body), {
-    status,
-    headers: { ...CORS, 'Content-Type': 'application/json', ...extra }
-  });
 }
-
-// ─── MAIN HANDLER ────────────────────────────────────────────────────────────
-export default {
-  async fetch(request) {
-    const url    = new URL(request.url);
-    const path   = url.pathname;
-    const origin = url.origin;
-
-    if (request.method === 'OPTIONS') {
-      return new Response(null, { status: 204, headers: CORS });
-    }
-
-    // ── /health ──────────────────────────────────────────────────────────
-    if (path === '/health') {
-      return jsonResp({ status: 'ok', x402: true, network: 'base', asset: 'USDC', content: 'stacks-sbtc-yields' });
-    }
-
-    // ── discovery ── x402scan hits /.well-known/x402 ──────────────────
-    if (path === '/.well-known/x402' || path === '/x402-info') {
-      return jsonResp(discoveryDoc(origin));
-    }
-
-    // ── protected routes: / and /data ──────────────────────────────────
-    if (path === '/' || path === '/data') {
-
-      const payHeader = request.headers.get('X-Payment');
-
-      // no payment
-      if (!payHeader) {
-        // browser on root → HTML
-        if (path === '/' && request.headers.get('Accept')?.includes('text/html')) {
-          return new Response(HTML, { headers: { ...CORS, 'Content-Type': 'text/html; charset=utf-8' } });
-        }
-        // everything else (agent, curl, x402scan probe) → 402 + discovery in body
-        return jsonResp(discoveryDoc(origin), 402);
-      }
-
-      // has payment
-      try {
-        const payment = JSON.parse(payHeader);
-
-        if (!payment.txHash || String(payment.amount) !== AMOUNT_HUMAN) {
-          return jsonResp({ error: 'Invalid payment — need {"txHash":"0x…","amount":"0.01"}' }, 402);
-        }
-
-        return jsonResp(YIELD_PAYLOAD, 200, { 'X-Payment-Verified': 'true' });
-
-      } catch (_) {
-        return jsonResp({ error: 'Malformed X-Payment header' }, 400);
-      }
-    }
-
-    // ── 404 ──────────────────────────────────────────────────────────────
-    return jsonResp({ error: 'Not found', routes: ['/', '/data', '/.well-known/x402', '/x402-info', '/health'] }, 404);
-  }
-};
