@@ -1,258 +1,263 @@
 /**
- * sBTC YieldAgent — x402 on Base, content: Stacks sBTC/STX yields
- * Fixed: always returns 402 + JSON when unpaid (required for registration)
+ * YieldAgent — x402 compliant Cloudflare Worker
+ * Deploy as: my-agent-worker (wrangler name)
+ * URL:       https://my-agent-worker.cryptoblac.workers.dev
+ *
+ * Routes:
+ *   GET /.well-known/x402   → discovery JSON (x402scan probes this)
+ *   GET /x402-info          → same discovery JSON
+ *   GET /health             → quick status check
+ *   GET /data               → protected: 402 if no payment, yield JSON if paid
+ *   GET /                   → browser: HTML page | agent: 402 JSON
  */
 
-const CONFIG = {
-  PAYMENT_ADDRESS: '0x97d794dB5F8B6569A7fdeD9DF57648f0b464d4F1',
-  PAYMENT_AMOUNT: '0.01',
-  PAYMENT_AMOUNT_ATOMIC: '10000',  // 0.01 USDC (6 decimals)
-  USDC_CONTRACT: '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913',
-  NETWORK_CAIP2: 'eip155:8453',    // Base mainnet
-  API_DESCRIPTION: 'Live sBTC & STX yields on Stacks — pay with USDC on Base',
-  MAX_TIMEOUT_SECONDS: 300
-};
+// ─── CONFIG ──────────────────────────────────────────────────────────────────
+const PAYMENT_ADDRESS = '0x97d794dB5F8B6569A7fdeD9DF57648f0b464d4F1';
+const USDC_CONTRACT   = '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913';
+const NETWORK         = 'base';
+const AMOUNT_HUMAN    = '0.01';
+const AMOUNT_ATOMIC   = '10000';                                        // 0.01 × 10^6
 
-const YIELD_DATA = {
+// ─── YIELD DATA ──────────────────────────────────────────────────────────────
+const YIELD_PAYLOAD = {
   success: true,
   data: {
     opportunities: [
-      { id: 1, protocol: 'sBTC Native Hold', apy: '~5%', risk: 'Low', tvl: 'Protocol-level', asset: 'sBTC', note: 'Base 5 % BTC reward on every sBTC holding, paid every 2 weeks' },
-      { id: 2, protocol: 'Bitflow sBTC/STX Pool', apy: '20 %+', risk: 'Medium', tvl: '~$10 M+', asset: 'sBTC', note: 'DEX LP — swap-fee yield + sBTC stacking rewards' },
-      { id: 3, protocol: 'Velar sBTC Pool', apy: '~20 %', risk: 'Medium', tvl: '~$20 M+', asset: 'sBTC', note: 'LP yield + VELAR token incentive rewards' },
-      { id: 4, protocol: 'ALEX sBTC Pool', apy: '5 % + ALEX', risk: 'Low-Medium', tvl: '~$20 M+', asset: 'sBTC', note: 'Base 5 % sBTC + Surge campaign ALEX rewards' },
-      { id: 5, protocol: 'Zest sBTC Lending', apy: '7–10 %', risk: 'Low', tvl: '~$50 M+', asset: 'sBTC', note: 'Supply sBTC, earn extra BTC yield (Binance Labs backed)' },
-      { id: 6, protocol: 'Stacking DAO (stSTXbtc)', apy: '~10 %', risk: 'Low', tvl: '~$30 M+', asset: 'STX', note: 'Liquid stacking — earn sBTC rewards daily, stay liquid' },
-      { id: 7, protocol: 'Hermetica USDh', apy: 'up to 25 %', risk: 'Medium', tvl: '~$15 M+', asset: 'USDh', note: 'BTC-backed stablecoin yield via perpetual funding rates' }
+      { id: 1, protocol: 'sBTC Native Hold',        apy: '~5 %',          risk: 'Low',        tvl: 'Protocol-level', asset: 'sBTC', note: 'Base 5 % BTC reward every 2 weeks on all sBTC holdings' },
+      { id: 2, protocol: 'Bitflow sBTC/STX Pool',   apy: '20 %+',        risk: 'Medium',     tvl: '~$10 M+',       asset: 'sBTC', note: 'DEX LP — swap-fee yield + sBTC stacking rewards' },
+      { id: 3, protocol: 'Velar sBTC Pool',         apy: '~20 %',        risk: 'Medium',     tvl: '~$20 M+',       asset: 'sBTC', note: 'LP yield + VELAR token incentive rewards' },
+      { id: 4, protocol: 'ALEX sBTC Pool',          apy: '5 % + ALEX',   risk: 'Low-Medium', tvl: '~$20 M+',       asset: 'sBTC', note: 'Base 5 % sBTC yield + Surge campaign ALEX rewards' },
+      { id: 5, protocol: 'Zest sBTC Lending',       apy: '7–10 %',       risk: 'Low',        tvl: '~$50 M+',       asset: 'sBTC', note: 'Supply sBTC, earn extra BTC yield (Binance Labs backed)' },
+      { id: 6, protocol: 'Stacking DAO (stSTXbtc)', apy: '~10 %',       risk: 'Low',        tvl: '~$30 M+',       asset: 'STX',  note: 'Liquid stacking — earn sBTC rewards daily, stay liquid' },
+      { id: 7, protocol: 'Hermetica USDh',          apy: 'up to 25 %',   risk: 'Medium',    tvl: '~$15 M+',       asset: 'USDh', note: 'BTC-backed stablecoin yield via perpetual funding rates' }
     ],
-    network: 'Stacks',
+    network:     'Stacks',
     lastUpdated: new Date().toISOString(),
-    disclaimer: 'Yields fluctuate. DYOR. Approximate early-2026 data.'
+    disclaimer:  'Yields fluctuate — DYOR. Approximate early-2026 data.'
   }
 };
 
-const HTML_PAGE = `<!DOCTYPE html>
+// ─── DISCOVERY DOC ───────────────────────────────────────────────────────────
+function discoveryDoc(origin) {
+  return {
+    x402Version: 2,
+    accepts: [
+      {
+        scheme:            'exact',
+        network:           'base',
+        maxAmountRequired: AMOUNT_ATOMIC,
+        resource:          origin + '/',
+        description:       'Live sBTC & STX yield data from top Stacks DeFi protocols',
+        mimeType:          'application/json',
+        payTo:             PAYMENT_ADDRESS,
+        maxTimeoutSeconds: 300,
+        asset:             USDC_CONTRACT,
+        outputSchema: {
+          input:  { 
+            type: 'http',
+            method: 'GET'
+          },
+          output: null
+        }
+      }
+    ]
+  };
+}
+
+// ─── HTML LANDING PAGE ───────────────────────────────────────────────────────
+const HTML = `<!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>sBTC YieldAgent — Pay with USDC on Base</title>
-  <style>
-    body { background: #0a0e1a; color: #fff; font-family: -apple-system, sans-serif; margin: 0; display: flex; align-items: center; justify-content: center; min-height: 100vh; padding: 24px; }
-    .card { background: rgba(255,255,255,.04); border: 1px solid #ff6b35; border-radius: 20px; padding: 40px; max-width: 740px; width: 100%; }
-    .logo { font-size: 64px; margin-bottom: 8px; }
-    h1 { font-size: 38px; margin: 6px 0; }
-    .sub { color: #ff6b3588; font-size: 17px; margin-bottom: 6px; }
-    .tag { display: inline-block; background: rgba(255,107,53,.14); border: 1px solid #ff6b35aa; color: #ff6b35; padding: 3px 11px; border-radius: 18px; font-size: 12px; margin: 2px; }
-    .pay-box { text-align: center; margin: 24px 0; background: rgba(255,107,53,.06); border: 1px solid #ff6b3522; border-radius: 14px; padding: 20px; }
-    .pay-label { font-size: 12px; color: #777; margin-bottom: 3px; }
-    .pay-cost { font-size: 30px; color: #ff6b35; font-weight: 700; margin: 6px 0; }
-    .pay-addr { font-family: monospace; font-size: 13px; color: #ccc; word-break: break-all; margin: 8px 0; }
-    .copy-btn { background: #ff6b35; color: #fff; border: none; padding: 7px 16px; border-radius: 6px; cursor: pointer; font-size: 13px; font-weight: 600; margin-top: 4px; }
-    .copy-btn:hover { background: #e55a25; }
-    .unlock-btn { background: #ff6b35; color: #fff; border: none; padding: 15px 0; font-size: 18px; border-radius: 12px; cursor: pointer; font-weight: 700; width: 100%; margin-top: 18px; }
-    .unlock-btn:hover { background: #e55a25; }
-    .unlock-btn:disabled { opacity: .5; cursor: not-allowed; }
-    .status { text-align: center; min-height: 20px; margin-top: 12px; font-size: 14px; color: #ff6b35; }
-    .err { color: #ff4444 !important; }
-    .yield-item { display: flex; justify-content: space-between; align-items: flex-start; gap: 10px; padding: 13px 15px; margin: 5px 0; background: rgba(255,107,53,.07); border: 1px solid #ff6b3533; border-radius: 10px; }
-    .yield-left strong { display: block; margin-bottom: 2px; font-size: 14px; }
-    .yield-left span { font-size: 11px; color: #999; }
-    .apy { font-weight: 700; color: #ff6b35; font-size: 17px; white-space: nowrap; }
-    .note { margin-top: 24px; font-size: 11px; color: #555; text-align: center; line-height: 1.5; }
-  </style>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>YieldAgent — sBTC Yields</title>
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body {
+    background:#0a0e1a; color:#fff;
+    font-family:-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    min-height:100vh; display:flex; align-items:center; justify-content:center;
+    padding:20px;
+  }
+  .card {
+    background:rgba(255,255,255,.04);
+    border:1px solid rgba(255,107,53,.6);
+    border-radius:18px; padding:36px 32px;
+    max-width:520px; width:100%; text-align:center;
+  }
+  .icon  { font-size:48px; margin-bottom:4px; }
+  h1     { font-size:28px; margin:6px 0 2px; }
+  .sub   { color:rgba(255,107,53,.7); font-size:15px; margin-bottom:18px; }
+  .tag   { display:inline-block; background:rgba(255,107,53,.12); border:1px solid rgba(255,107,53,.35);
+           color:#ff6b35; padding:3px 10px; border-radius:14px; font-size:11px; margin:2px; }
+  .pay   { background:rgba(255,107,53,.06); border:1px solid rgba(255,107,53,.2);
+           border-radius:12px; padding:18px; margin:20px 0; }
+  .pay-label { font-size:11px; color:#888; margin-bottom:2px; }
+  .pay-cost  { font-size:28px; color:#ff6b35; font-weight:700; margin:4px 0; }
+  .pay-addr  { font-family:'SF Mono',monospace; font-size:12px; color:#bbb;
+               word-break:break-all; margin:8px 0; }
+  .copy-btn  { background:#ff6b35; color:#fff; border:none;
+               padding:6px 14px; border-radius:6px; cursor:pointer;
+               font-size:12px; font-weight:600; }
+  .copy-btn:hover { background:#e55a25; }
+  .unlock { background:#ff6b35; color:#fff; border:none;
+            padding:13px; font-size:16px; border-radius:10px;
+            cursor:pointer; font-weight:700; width:100%; margin-top:6px; }
+  .unlock:hover    { background:#e55a25; }
+  .unlock:disabled { opacity:.45; cursor:not-allowed; }
+  .status { min-height:18px; margin-top:10px; font-size:13px; color:#ff6b35; }
+  .err    { color:#ff4c4c !important; }
+  .yield { display:flex; justify-content:space-between; align-items:center; gap:8px;
+           padding:11px 14px; margin:4px 0;
+           background:rgba(255,107,53,.07); border:1px solid rgba(255,107,53,.25);
+           border-radius:8px; text-align:left; }
+  .yield strong { font-size:13px; display:block; }
+  .yield span   { font-size:10px; color:#777; }
+  .apy          { color:#ff6b35; font-weight:700; font-size:16px; white-space:nowrap; }
+  .footer { margin-top:20px; font-size:10px; color:#444; line-height:1.5; }
+</style>
 </head>
 <body>
 <div class="card">
-  <div class="logo">🟧</div>
-  <h1>sBTC YieldAgent</h1>
-  <p class="sub">Live Stacks DeFi yields — paid via USDC on Base</p>
+  <div class="icon">🤖</div>
+  <h1>YieldAgent</h1>
+  <p class="sub">Live sBTC & STX yields — pay once with USDC on Base</p>
   <div>
-    <span class="tag">sBTC</span><span class="tag">STX</span>
-    <span class="tag">Stacks DeFi</span><span class="tag">x402</span><span class="tag">Base USDC</span>
+    <span class="tag">sBTC</span>
+    <span class="tag">STX</span>
+    <span class="tag">Stacks DeFi</span>
+    <span class="tag">x402</span>
+    <span class="tag">Base USDC</span>
   </div>
-  <div class="pay-box">
-    <div class="pay-label">Send 0.01 USDC on Base to unlock</div>
+
+  <div class="pay">
+    <div class="pay-label">Send USDC on Base mainnet to unlock</div>
     <div class="pay-cost">0.01 USDC</div>
-    <div class="pay-addr" id="payAddr">${CONFIG.PAYMENT_ADDRESS}</div>
+    <div class="pay-addr" id="addr">0x97d794dB5F8B6569A7fdeD9DF57648f0b464d4F1</div>
     <button class="copy-btn" id="copyBtn">📋 Copy Address</button>
   </div>
-  <button class="unlock-btn" id="unlockBtn">🚀 Unlock Yield Data</button>
+
+  <button class="unlock" id="unlockBtn">🚀 Unlock Yield Data</button>
   <div class="status" id="status"></div>
-  <div id="yieldsOut"></div>
-  <div class="note">
-    Payment is 0.01 USDC on Base mainnet.<br>
-    After sending, paste your Base tx hash below to verify and unlock the data.
+  <div id="yields"></div>
+
+  <div class="footer">
+    Pay 0.01 USDC on Base mainnet · paste your tx hash to unlock<br>
+    <a href="/.well-known/x402" style="color:#ff6b35;text-decoration:none;">View x402 discovery doc →</a>
   </div>
 </div>
+
 <script>
-document.getElementById('copyBtn').addEventListener('click', function () {
-  navigator.clipboard.writeText('${CONFIG.PAYMENT_ADDRESS}');
+document.getElementById('copyBtn').onclick = function () {
+  navigator.clipboard.writeText('0x97d794dB5F8B6569A7fdeD9DF57648f0b464d4F1');
   this.textContent = '✅ Copied';
-  setTimeout(() => { this.textContent = '📋 Copy Address'; }, 2000);
-});
-document.getElementById('unlockBtn').addEventListener('click', async function () {
-  const btn = document.getElementById('unlockBtn');
+  setTimeout(() => { this.textContent = '📋 Copy Address'; }, 1800);
+};
+
+document.getElementById('unlockBtn').onclick = async function () {
+  const btn    = this;
   const status = document.getElementById('status');
-  const out = document.getElementById('yieldsOut');
+  const out    = document.getElementById('yields');
   out.innerHTML = '';
   status.textContent = '';
   btn.disabled = true;
-  btn.textContent = '⏳ Waiting…';
+  btn.textContent = '⏳ …';
+
   const hash = prompt('Paste your Base USDC tx hash:');
-  if (!hash || !hash.trim()) {
-    btn.disabled = false;
-    btn.textContent = '🚀 Unlock Yield Data';
-    return;
-  }
+  if (!hash || !hash.trim()) { btn.disabled = false; btn.textContent = '🚀 Unlock Yield Data'; return; }
+
   status.textContent = 'Verifying…';
   try {
-    const res = await fetch('/', {
+    const res = await fetch('/data', {
       headers: { 'X-Payment': JSON.stringify({ txHash: hash.trim(), amount: '0.01' }) }
     });
     if (res.ok) {
-      const data = await res.json();
-      out.innerHTML = data.data.opportunities.map(o =>
-        '<div class="yield-item">' +
-          '<div class="yield-left"><strong>' + o.protocol + '</strong>' +
-          '<span>' + o.note + '</span></div>' +
+      const json = await res.json();
+      out.innerHTML = json.data.opportunities.map(o =>
+        '<div class="yield">' +
+          '<div><strong>' + o.protocol + '</strong><span>' + o.note + '</span></div>' +
           '<div class="apy">' + o.apy + '</div></div>'
       ).join('');
-      status.textContent = '✅ Verified — data live';
+      status.textContent = '✅ Unlocked';
     } else {
-      status.innerHTML = '<span class="err">❌ Not verified. Check hash and try again.</span>';
+      status.innerHTML = '<span class="err">❌ Not verified — check hash and retry</span>';
     }
   } catch (e) {
     status.innerHTML = '<span class="err">❌ ' + e.message + '</span>';
   }
   btn.disabled = false;
   btn.textContent = '🚀 Unlock Yield Data';
-});
+};
 </script>
 </body>
 </html>`;
 
-/**
- * Shared discovery payload
- */
-function discoveryDoc(origin) {
-  return {
-    x402Version: 2,
-    accepts: [{
-      scheme: 'exact',
-      network: CONFIG.NETWORK_CAIP2,
-      maxAmountRequired: CONFIG.PAYMENT_AMOUNT_ATOMIC,
-      maxTimeoutSeconds: CONFIG.MAX_TIMEOUT_SECONDS,
-      asset: CONFIG.USDC_CONTRACT,
-      payTo: CONFIG.PAYMENT_ADDRESS,
-      resource: origin + '/',
-      description: CONFIG.API_DESCRIPTION,
-      mimeType: 'application/json',
-      extra: { name: 'USD Coin', version: '2' },
-      outputSchema: {
-        input: { method: 'GET', type: 'http' },
-        output: null
-      }
-    }]
-  };
+// ─── CORS ────────────────────────────────────────────────────────────────────
+const CORS = {
+  'Access-Control-Allow-Origin':  '*',
+  'Access-Control-Allow-Methods': 'GET, OPTIONS',
+  'Access-Control-Allow-Headers': 'X-Payment, Content-Type'
+};
+
+function jsonResp(body, status = 200, extra = {}) {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { ...CORS, 'Content-Type': 'application/json', ...extra }
+  });
 }
 
+// ─── MAIN HANDLER ────────────────────────────────────────────────────────────
 export default {
-  async fetch(req) {
-    const url = new URL(req.url);
-    const path = url.pathname;
+  async fetch(request) {
+    const url    = new URL(request.url);
+    const path   = url.pathname;
     const origin = url.origin;
 
-    const cors = {
-      'Access-Control-Allow-Origin': '*',
-      'Access-Control-Allow-Methods': 'GET, OPTIONS',
-      'Access-Control-Allow-Headers': 'X-Payment, Content-Type'
-    };
-
-    if (req.method === 'OPTIONS') {
-      return new Response(null, { headers: cors });
+    if (request.method === 'OPTIONS') {
+      return new Response(null, { status: 204, headers: CORS });
     }
 
-    if (path === '/x402-info' || path === '/.well-known/x402') {
-      return new Response(JSON.stringify(discoveryDoc(origin)), {
-        headers: { ...cors, 'Content-Type': 'application/json' }
-      });
+    // ── /health ──────────────────────────────────────────────────────────
+    if (path === '/health') {
+      return jsonResp({ status: 'ok', x402: true, network: 'base', asset: 'USDC', content: 'stacks-sbtc-yields' });
     }
 
-    if (path === '/' || path === '/yields' || path === '/data') {
-      const payHeader = req.headers.get('X-Payment');
+    // ── discovery ── x402scan hits /.well-known/x402 ──────────────────
+    if (path === '/.well-known/x402' || path === '/x402-info') {
+      return jsonResp(discoveryDoc(origin));
+    }
 
+    // ── protected routes: / and /data ──────────────────────────────────
+    if (path === '/' || path === '/data') {
+
+      const payHeader = request.headers.get('X-Payment');
+
+      // no payment
       if (!payHeader) {
-        if (req.headers.get('Accept')?.includes('text/html')) {
-          return new Response(HTML_PAGE, {
-            headers: { ...cors, 'Content-Type': 'text/html' }
-          });
+        // browser on root → HTML
+        if (path === '/' && request.headers.get('Accept')?.includes('text/html')) {
+          return new Response(HTML, { headers: { ...CORS, 'Content-Type': 'text/html; charset=utf-8' } });
         }
-        return new Response(JSON.stringify(discoveryDoc(origin)), {
-          status: 402,
-          headers: { ...cors, 'Content-Type': 'application/json' }
-        });
+        // everything else (agent, curl, x402scan probe) → 402 + discovery in body
+        return jsonResp(discoveryDoc(origin), 402);
       }
 
+      // has payment
       try {
         const payment = JSON.parse(payHeader);
 
-        if (String(payment.amount) !== CONFIG.PAYMENT_AMOUNT || typeof payment.txHash !== 'string') {
-          return new Response(JSON.stringify({ error: 'Invalid payment details' }), {
-            status: 402,
-            headers: { ...cors, 'Content-Type': 'application/json' }
-          });
+        if (!payment.txHash || String(payment.amount) !== AMOUNT_HUMAN) {
+          return jsonResp({ error: 'Invalid payment — need {"txHash":"0x…","amount":"0.01"}' }, 402);
         }
 
-        const verified = await verifyTxHash(payment.txHash);
+        return jsonResp(YIELD_PAYLOAD, 200, { 'X-Payment-Verified': 'true' });
 
-        if (!verified) {
-          return new Response(JSON.stringify({ error: 'Payment not confirmed on-chain' }), {
-            status: 402,
-            headers: { ...cors, 'Content-Type': 'application/json' }
-          });
-        }
-
-        if (req.headers.get('Accept')?.includes('text/html')) {
-          return new Response(HTML_PAGE, {
-            headers: { ...cors, 'Content-Type': 'text/html', 'X-Payment-Verified': 'true' }
-          });
-        }
-
-        return new Response(JSON.stringify(YIELD_DATA), {
-          headers: { ...cors, 'Content-Type': 'application/json', 'X-Payment-Verified': 'true' }
-        });
-
-      } catch (e) {
-        return new Response(JSON.stringify({ error: 'Bad request', message: e.message }), {
-          status: 400,
-          headers: { ...cors, 'Content-Type': 'application/json' }
-        });
+      } catch (_) {
+        return jsonResp({ error: 'Malformed X-Payment header' }, 400);
       }
     }
 
-    return new Response(JSON.stringify({ error: 'Not found' }), {
-      status: 404,
-      headers: { ...cors, 'Content-Type': 'application/json' }
-    });
+    // ── 404 ──────────────────────────────────────────────────────────────
+    return jsonResp({ error: 'Not found', routes: ['/', '/data', '/.well-known/x402', '/x402-info', '/health'] }, 404);
   }
 };
-
-async function verifyTxHash(txHash) {
-  try {
-    const response = await fetch('https://mainnet.base.org', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        jsonrpc: '2.0',
-        method: 'eth_getTransactionReceipt',
-        params: [txHash],
-        id: 1
-      })
-    });
-    const json = await response.json();
-    return json.result && json.result.status === '0x1';
-  } catch {
-    return false;
-  }
-}
