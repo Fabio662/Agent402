@@ -1,6 +1,24 @@
-name = "sbtc-yield-api"
-main = "worker.js"
-compatibility_date = "2024-01-01"
+name = "yield-agent-whitelabel"
+main = "src/worker.js"
+compatibility_date = "2026-02-13"
 
-[vars]
-ENVIRONMENT = "production"
+account_id = "206160affb03ad6e140c53cbbc76ae4f"   # Your Cloudflare Account ID
+zone_id = "acf05d7714db2d32ceda6683a7d1c28e"      # Your Zone ID
+
+# Routes
+routes = [
+  { pattern = "yieldagentx402.app/*", zone_id = "acf05d7714db2d32ceda6683a7d1c28e" },
+  { pattern = "api.yieldagentx402.app/*", zone_id = "acf05d7714db2d32ceda6683a7d1c28e" }
+]
+
+# KV Storage
+[[kv_namespaces]]
+binding = "REGISTRATIONS"
+id = "YOUR_REAL_KV_ID_FOR_REGISTRATIONS"
+
+[[kv_namespaces]]
+binding = "WHITELABELS"
+id = "YOUR_REAL_KV_ID_FOR_WHITELABELS"
+
+[env.production]
+vars = { ENVIRONMENT = "production" }
