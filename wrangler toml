@@ -1,24 +1,42 @@
 name = "yield-agent-whitelabel"
 main = "src/worker.js"
 compatibility_date = "2026-02-13"
+type = "javascript"
 
-account_id = "206160affb03ad6e140c53cbbc76ae4f"   # Your Cloudflare Account ID
-zone_id = "acf05d7714db2d32ceda6683a7d1c28e"      # Your Zone ID
-
-# Routes
+# =========================
+# ROUTES
+# =========================
 routes = [
   { pattern = "yieldagentx402.app/*", zone_id = "acf05d7714db2d32ceda6683a7d1c28e" },
   { pattern = "api.yieldagentx402.app/*", zone_id = "acf05d7714db2d32ceda6683a7d1c28e" }
 ]
 
-# KV Storage
+# =========================
+# KV NAMESPACES
+# =========================
 [[kv_namespaces]]
 binding = "REGISTRATIONS"
-id = "YOUR_REAL_KV_ID_FOR_REGISTRATIONS"
+id = "YOUR_KV_ID_FOR_REGISTRATIONS"
 
 [[kv_namespaces]]
 binding = "WHITELABELS"
-id = "YOUR_REAL_KV_ID_FOR_WHITELABELS"
+id = "YOUR_KV_ID_FOR_WHITELABELS"
 
+# =========================
+# ENVIRONMENTS
+# =========================
 [env.production]
-vars = { ENVIRONMENT = "production" }
+vars = { 
+  ENVIRONMENT = "production" 
+}
+
+# =========================
+# ACCOUNT ID (from Cloudflare)
+# =========================
+account_id = "206160affb03ad6e140c53cbbc76ae4f"
+
+# =========================
+# OPTIONAL SETTINGS
+# =========================
+[build]
+upload_format = "service-worker"  # Ensure it's JS, not modules
