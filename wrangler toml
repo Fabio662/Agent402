@@ -2,22 +2,23 @@ name = "yield-agent-whitelabel"
 main = "worker.js"
 compatibility_date = "2026-02-13"
 
-# ==================== ROUTES ====================
+# Routes for your worker
 routes = [
   { pattern = "yieldagentx402.app/*", zone_id = "acf05d7714db2d32ceda6683a7d1c28e" },
   { pattern = "api.yieldagentx402.app/*", zone_id = "acf05d7714db2d32ceda6683a7d1c28e" }
 ]
 
-# ==================== KV NAMESPACES ====================
+# KV Storage Namespaces
 [[kv_namespaces]]
 binding = "REGISTRATIONS"
-id = "acf05d7714db2d32ceda6683a7d1c28e"  # KV for agent registrations
+id = "YOUR_REGISTRATIONS_KV_ID"
 
 [[kv_namespaces]]
 binding = "WHITELABELS"
-id = "2a1b3c4d5e6f7g8h9i0jklmnopqrstu"  # KV for whitelabel configs
+id = "YOUR_WHITELABELS_KV_ID"
 
-# ==================== ENVIRONMENT ====================
+# Account info
+account_id = "206160affb03ad6e140c53cbbc76ae4f"
+
 [env.production]
 vars = { ENVIRONMENT = "production" }
-
