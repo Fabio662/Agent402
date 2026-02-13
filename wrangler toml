@@ -1,8 +1,8 @@
 name = "yield-agent-whitelabel"
-main = "worker.js"          # ← make sure this matches your saved file
+main = "worker.js"
 compatibility_date = "2026-02-13"
 
-# Routes (replace YOUR_ZONE_ID with actual zone ID)
+# Routes
 [[routes]]
 pattern = "yieldagentx402.app/*"
 zone_id = "acf05d7714db2d32ceda6683a7d1c28e"
